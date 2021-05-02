@@ -19,9 +19,14 @@
 using namespace std;
 
 // openCV
-#include <opencv/highgui.h>
-#include <opencv/cv.h>
+#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/opencv.hpp>
 using namespace cv;
+
+#define CV_RETR_LIST cv::RETR_LIST
+#define CV_CHAIN_APPROX_SIMPLE cv::CHAIN_APPROX_SIMPLE 
+#define CV_GRAY2BGR cv::COLOR_GRAY2BGR 
+#define CV_FILLED cv::FILLED
 
 // openNI
 #include <XnOpenNI.h>
