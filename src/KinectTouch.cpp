@@ -16,6 +16,7 @@
 #include <iostream>
 #include <vector>
 #include <map>
+#include <fstream>
 using namespace std;
 
 // openCV
@@ -116,7 +117,7 @@ int main() {
 	const unsigned int nBackgroundTrain = 30;
 	const unsigned short touchDepthMin = 10;
 	const unsigned short touchDepthMax = 20;
-	const unsigned int touchMinArea = 50;
+	const unsigned int touchMinArea = 1;
 
 	const bool localClientMode = true; 					// connect to a local client
 
@@ -127,22 +128,22 @@ int main() {
 	const Scalar debugColor2(255,255,255);
 
 	int xMin = 110;
-	int xMax = 560;
+	int xMax = 512;
 	int yMin = 120;
-	int yMax = 320;
-
-	Mat1s depth(1080, 1920); // 16 bit depth (in millimeters)
-	Mat1b depth8(1080, 1920); // 8 bit depth
+	int yMax = 424;
+    
+	Mat1s depth(424, 512); // 16 bit depth (in millimeters)
+	Mat1b depth8(424, 512); // 8 bit depth
 	Mat3b rgb(1080, 1920); // 8 bit depth
 
-	Mat3b debug(1080, 1920); // debug visualization
+	Mat3b debug(424, 512); // debug visualization
 
-	Mat1s foreground(1920, 1080);
-	Mat1b foreground8(1920, 1080);
+	Mat1s foreground(512, 424);
+	Mat1b foreground8(512, 424);
 
-	Mat1b touch(1920, 1080); // touch mask
+	Mat1b touch(512, 424); // touch mask
 
-	Mat1s background(1080, 1920);
+	Mat1s background(424, 512);
 	vector<Mat1s> buffer(nBackgroundTrain);
 
 	if (initLibfreenect2() == -1) {
@@ -163,17 +164,18 @@ int main() {
 
 	// create some sliders
 	namedWindow(windowName);
-	createTrackbar("xMin", windowName, &xMin, 1920);
-	createTrackbar("xMax", windowName, &xMax, 1920);
-	createTrackbar("yMin", windowName, &yMin, 1080);
-	createTrackbar("yMax", windowName, &yMax, 1080);
+	createTrackbar("xMin", windowName, &xMin, 512);
+	createTrackbar("xMax", windowName, &xMax, 512);
+	createTrackbar("yMin", windowName, &yMin, 424);
+	createTrackbar("yMax", windowName, &yMax, 424);
 
+    libfreenect2::Frame *depthFrame;
 	// create background model (average depth)
 	for (unsigned int i=0; i<nBackgroundTrain; i++) {
 		listener->waitForNewFrame(frames, 10*1000);
-		depth.data = (uchar*) frames[libfreenect2::Frame::Depth];
+        depthFrame = frames[libfreenect2::Frame::Depth];
+        Mat(depthFrame->height, depthFrame->width, CV_32FC1, depthFrame->data).copyTo(depth);
 		buffer[i] = depth;
-        listener->release(frames);
 	}
 	average(buffer, background);
 
@@ -183,8 +185,9 @@ int main() {
 
 		// update 16 bit depth matrix
 
-        libfreenect2::Frame *depthFrame = frames[libfreenect2::Frame::Depth];
-		depth.data = (uchar*) depthFrame;
+        depthFrame = frames[libfreenect2::Frame::Depth];
+		// depth.data = (uchar*) depthFrame;
+        Mat(depthFrame->height, depthFrame->width, CV_32FC1, depthFrame->data).copyTo(depth);
 
 		// update rgb image
 		/* rgb.data = (uchar*) frames[libfreenect2::Frame::Color]; // segmentation fault here
@@ -204,10 +207,28 @@ int main() {
 		vector< vector<Point2i> > contours;
 		vector<Point2f> touchPoints;
 		findContours(touchRoi, contours, CV_RETR_LIST, CV_CHAIN_APPROX_SIMPLE, Point2i(xMin, yMin));
+        // vector<Point2i> my_contour {
+        //     Point2i(220, 110),
+        //     Point2i(232, 117),
+        //     Point2i(253, 167),
+        //     Point2i(254, 166),
+        //     Point2i(245, 167),
+        //     Point2i(254, 166)
+        // };
+        // contours.push_back(my_contour);
 		for (unsigned int i=0; i<contours.size(); i++) {
 			Mat contourMat(contours[i]);
-			// find touch points by area thresholding
-			if ( contourArea(contourMat) > touchMinArea ) {
+
+            double cArea = contourArea(contourMat);
+            if (cArea > 1) {
+                std::cout << "------------------------------------------------" << std::endl;
+                std::cout << cArea << std::endl;
+            }
+            
+
+
+            std::cout << "contour Area: " << cArea << ", touchMinArea: " << touchMinArea << std::endl;
+			if ( cArea > touchMinArea ) {
 				Scalar center = mean(contourMat);
 				Point2i touchPoint(center[0], center[1]);
 				touchPoints.push_back(touchPoint);
@@ -239,19 +260,20 @@ int main() {
 		// draw debug frame
 		depth.convertTo(depth8, CV_8U, 255 / debugFrameMaxDepth); // render depth to debug frame
 		cvtColor(depth8, debug, CV_GRAY2BGR);
-		// debug.setTo(debugColor0, touch);  // touch mask
+		debug.setTo(debugColor0, touch);  // touch mask
 		rectangle(debug, roi, debugColor1, 2); // surface boundaries
-		/* for (unsigned int i=0; i<touchPoints.size(); i++) { // touch points
-			circle(debug, touchPoints[i], 5, debugColor2, CV_FILLED);
-		} */
+		for (unsigned int i=0; i<touchPoints.size(); i++) { // touch points
+            std::cout << "ima touch point LOL" << std::endl;
+			circle(debug, touchPoints[i], 5, debugColor1, CV_FILLED);
+		}
 
 		// render debug frame (with sliders)
 		imshow(windowName, debug);
 		// imshow(windowName, depthFrame->Float);
 		// imshow("image", rgb);
-        listener->release(frames);
 
 	}
+    listener->release(frames);
     dev->stop();
     dev->close();
     delete listener;
