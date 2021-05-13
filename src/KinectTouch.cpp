@@ -28,16 +28,13 @@ using namespace cv;
 #define CV_GRAY2BGR cv::COLOR_GRAY2BGR 
 #define CV_FILLED cv::FILLED
 
-// openNI
-#include <XnOpenNI.h>
-#include <XnCppWrapper.h>
-using namespace xn;
-#define CHECK_RC(rc, what)											\
-	if (rc != XN_STATUS_OK)											\
-	{																\
-		printf("%s failed: %s\n", what, xnGetStatusString(rc));		\
-		return rc;													\
-	}
+// libfreenect2
+#include <libfreenect2/libfreenect2.hpp>
+#include <libfreenect2/frame_listener_impl.h>
+#include <libfreenect2/packet_pipeline.h>
+#include <libfreenect2/registration.h>
+#include <string>
+#include <iostream>
 
 // TUIO
 /*
@@ -51,10 +48,13 @@ using namespace TUIO;
 // Globals
 //---------------------------------------------------------------------------
 
-// OpenNI
-xn::Context xnContext;
-xn::DepthGenerator xnDepthGenerator;
-xn::ImageGenerator xnImgeGenertor;
+// libfreenect2
+std::string serial;
+libfreenect2::Freenect2 freenect2;
+libfreenect2::Freenect2Device *dev = 0;
+libfreenect2::PacketPipeline *pipeline = 0;
+libfreenect2::FrameMap frames;
+libfreenect2::SyncMultiFrameListener *listener;
 
 bool mousePressed = false;
 
@@ -62,21 +62,35 @@ bool mousePressed = false;
 // Functions
 //---------------------------------------------------------------------------
 
-int initOpenNI(const XnChar* fname) {
-	XnStatus nRetVal = XN_STATUS_OK;
-	ScriptNode scriptNode;
+int initLibfreenect2() {
+    if(freenect2.enumerateDevices() == 0) {
+        std::cout << "no device connected!" << std::endl;
+        return -1;
+    }
+    if (serial == "") {
+        serial = freenect2.getDefaultDeviceSerialNumber();
+    }
 
-	// initialize context
-	nRetVal = xnContext.InitFromXmlFile(fname, scriptNode);
-	CHECK_RC(nRetVal, "InitFromXmlFile");
+    pipeline = new libfreenect2::CpuPacketPipeline();
+    dev = freenect2.openDevice(serial, pipeline);
 
-	// initialize depth generator
-	nRetVal = xnContext.FindExistingNode(XN_NODE_TYPE_DEPTH, xnDepthGenerator);
-	CHECK_RC(nRetVal, "FindExistingNode(XN_NODE_TYPE_DEPTH)");
+    int types = 0;
+    types |= libfreenect2::Frame::Ir | libfreenect2::Frame::Depth | libfreenect2::Frame::Color;
+    listener = new libfreenect2::SyncMultiFrameListener(types);
+    dev->setColorFrameListener(listener);
+    dev->setIrAndDepthFrameListener(listener);
 
-	// initialize image generator
-	nRetVal = xnContext.FindExistingNode(XN_NODE_TYPE_IMAGE, xnImgeGenertor);
-	CHECK_RC(nRetVal, "FindExistingNode(XN_NODE_TYPE_IMAGE)");
+    if (!dev->start()) {
+        std::cout << "could not start device" << std::endl;
+        return -1;
+    }
+
+    std::cout << "device serial: " << dev->getSerialNumber() << std::endl;
+    std::cout << "device firmware: " << dev->getFirmwareVersion() << std::endl;
+
+    libfreenect2::Registration* registration = new libfreenect2::Registration(
+            dev->getIrCameraParams(), dev->getColorCameraParams());
+    libfreenect2::Frame undistorted(512, 424, 4), registered(512, 424, 4);
 
 	return 0;
 }
@@ -117,21 +131,24 @@ int main() {
 	int yMin = 120;
 	int yMax = 320;
 
-	Mat1s depth(480, 640); // 16 bit depth (in millimeters)
-	Mat1b depth8(480, 640); // 8 bit depth
-	Mat3b rgb(480, 640); // 8 bit depth
+	Mat1s depth(1080, 1920); // 16 bit depth (in millimeters)
+	Mat1b depth8(1080, 1920); // 8 bit depth
+	Mat3b rgb(1080, 1920); // 8 bit depth
 
-	Mat3b debug(480, 640); // debug visualization
+	Mat3b debug(1080, 1920); // debug visualization
 
-	Mat1s foreground(640, 480);
-	Mat1b foreground8(640, 480);
+	Mat1s foreground(1920, 1080);
+	Mat1b foreground8(1920, 1080);
 
-	Mat1b touch(640, 480); // touch mask
+	Mat1b touch(1920, 1080); // touch mask
 
-	Mat1s background(480, 640);
+	Mat1s background(1080, 1920);
 	vector<Mat1s> buffer(nBackgroundTrain);
 
-	initOpenNI("../niConfig.xml");
+	if (initLibfreenect2() == -1) {
+        std::cout << "failed to initialize libfreenect2" << std::endl;
+        exit(-1);
+    }
 
 	// TUIO server object
 	/*
@@ -146,32 +163,32 @@ int main() {
 
 	// create some sliders
 	namedWindow(windowName);
-	createTrackbar("xMin", windowName, &xMin, 640);
-	createTrackbar("xMax", windowName, &xMax, 640);
-	createTrackbar("yMin", windowName, &yMin, 480);
-	createTrackbar("yMax", windowName, &yMax, 480);
+	createTrackbar("xMin", windowName, &xMin, 1920);
+	createTrackbar("xMax", windowName, &xMax, 1920);
+	createTrackbar("yMin", windowName, &yMin, 1080);
+	createTrackbar("yMax", windowName, &yMax, 1080);
 
 	// create background model (average depth)
 	for (unsigned int i=0; i<nBackgroundTrain; i++) {
-		xnContext.WaitAndUpdateAll();
-		depth.data = (uchar*) xnDepthGenerator.GetDepthMap();
+		listener->waitForNewFrame(frames, 10*1000);
+		depth.data = (uchar*) frames[libfreenect2::Frame::Depth];
 		buffer[i] = depth;
+        listener->release(frames);
 	}
 	average(buffer, background);
 
 	while ( (char) waitKey(1) != (char) 27 ) {
 		// read available data
-		xnContext.WaitAndUpdateAll();
+		listener->waitForNewFrame(frames, 10*1000);
 
 		// update 16 bit depth matrix
-		depth.data = (uchar*) xnDepthGenerator.GetDepthMap();
-		//xnImgeGenertor.GetGrayscale8ImageMap()
 
-
+        libfreenect2::Frame *depthFrame = frames[libfreenect2::Frame::Depth];
+		depth.data = (uchar*) depthFrame;
 
 		// update rgb image
-		//rgb.data = (uchar*) xnImgeGenertor.GetRGB24ImageMap(); // segmentation fault here
-		//cvtColor(rgb, rgb, CV_RGB2BGR);
+		/* rgb.data = (uchar*) frames[libfreenect2::Frame::Color]; // segmentation fault here
+		cvtColor(rgb, rgb, COLOR_RGB2BGR); */
 
 		// extract foreground by simple subtraction of very basic background model
 		foreground = background - depth;
@@ -198,8 +215,8 @@ int main() {
 		}
 
 		// send TUIO cursors
-		/*
-		time = TuioTime::getSessionTime();
+		
+		/* time = TuioTime::getSessionTime();
 		tuio->initFrame(time);
 
 		for (unsigned int i=0; i<touchPoints.size(); i++) { // touch points
@@ -216,22 +233,30 @@ int main() {
 
 		tuio->stopUntouchedMovingCursors();
 		tuio->removeUntouchedStoppedCursors();
-		tuio->commitFrame();
-		*/
+		tuio->commitFrame(); */
+	
 
 		// draw debug frame
 		depth.convertTo(depth8, CV_8U, 255 / debugFrameMaxDepth); // render depth to debug frame
 		cvtColor(depth8, debug, CV_GRAY2BGR);
-		debug.setTo(debugColor0, touch);  // touch mask
+		// debug.setTo(debugColor0, touch);  // touch mask
 		rectangle(debug, roi, debugColor1, 2); // surface boundaries
-		for (unsigned int i=0; i<touchPoints.size(); i++) { // touch points
+		/* for (unsigned int i=0; i<touchPoints.size(); i++) { // touch points
 			circle(debug, touchPoints[i], 5, debugColor2, CV_FILLED);
-		}
+		} */
 
 		// render debug frame (with sliders)
 		imshow(windowName, debug);
-		//imshow("image", rgb);
+		// imshow(windowName, depthFrame->Float);
+		// imshow("image", rgb);
+        listener->release(frames);
+
 	}
+    dev->stop();
+    dev->close();
+    delete listener;
+    delete dev;
+    delete pipeline;
 
 	return 0;
 }
