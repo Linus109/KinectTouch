@@ -14,6 +14,7 @@
  */
 
 #include <iostream>
+#include <ostream>
 #include <vector>
 #include <map>
 #include <fstream>
@@ -21,6 +22,7 @@ using namespace std;
 
 // openCV
 #include <opencv2/highgui/highgui.hpp>
+#include <opencv2/core/mat.hpp>
 #include <opencv2/opencv.hpp>
 using namespace cv;
 
@@ -38,10 +40,8 @@ using namespace cv;
 #include <iostream>
 
 // TUIO
-/*
 #include "TuioServer.h"
 using namespace TUIO;
-*/
 
 // TODO smoothing using kalman filter
 
@@ -96,28 +96,50 @@ int initLibfreenect2() {
 	return 0;
 }
 
+void printMat1d(Mat1d& m) {
+    // for (int i = 0; i < background.rows; i++) {
+        for (int j = 0; j < m.cols; j++) {
+            short val = m.at<double>(j, 212);
+            std::cout << "x:  " << j << ", y:" << 212 << ", value = " << val << std::endl;
+        }
+    // }
+}
+
+void printMat1s(Mat1s& m) {
+    // for (int i = 0; i < background.rows; i++) {
+        for (int j = 0; j < m.cols; j++) {
+            short val = m.at<short>(j, 212);
+            std::cout << "x:  " << j << ", y:" << 212 << ", value = " << val << std::endl;
+        }
+    // }
+}
+
 void average(vector<Mat1s>& frames, Mat1s& mean) {
 	Mat1d acc(mean.size());
 	Mat1d frame(mean.size());
+    frames[0].convertTo(acc, CV_64FC1);
 
-	for (unsigned int i=0; i<frames.size(); i++) {
+	for (unsigned int i=1; i<frames.size(); i++) {
 		frames[i].convertTo(frame, CV_64FC1);
+        // std::cout << "frame -------------" << std::endl;
+        // printMat1d(frame);
 		acc = acc + frame;
+        // std::cout << "frame -------------" << std::endl;
+        // printMat1d(acc);
 	}
 
 	acc = acc / frames.size();
+    // printMat1d(acc);
 
 	acc.convertTo(mean, CV_16SC1);
 }
-
-
 
 int main() {
 
 	const unsigned int nBackgroundTrain = 30;
 	const unsigned short touchDepthMin = 10;
 	const unsigned short touchDepthMax = 20;
-	const unsigned int touchMinArea = 1;
+	const unsigned int touchMinArea = 50;
 
 	const bool localClientMode = true; 					// connect to a local client
 
@@ -152,15 +174,15 @@ int main() {
     }
 
 	// TUIO server object
-	/*
 	TuioServer* tuio;
 	if (localClientMode) {
 		tuio = new TuioServer();
+        std::cout << "--- we are local ---" << std::endl;
 	} else {
 		tuio = new TuioServer("192.168.0.2",3333,false);
+        std::cout << "--- we are NOOOOOT local ---" << std::endl;
 	}
 	TuioTime time;
-	*/
 
 	// create some sliders
 	namedWindow(windowName);
@@ -178,7 +200,8 @@ int main() {
 		buffer[i] = depth;
 	}
 	average(buffer, background);
-
+    // printMat(background);
+    
 	while ( (char) waitKey(1) != (char) 27 ) {
 		// read available data
 		listener->waitForNewFrame(frames, 10*1000);
@@ -207,15 +230,6 @@ int main() {
 		vector< vector<Point2i> > contours;
 		vector<Point2f> touchPoints;
 		findContours(touchRoi, contours, CV_RETR_LIST, CV_CHAIN_APPROX_SIMPLE, Point2i(xMin, yMin));
-        // vector<Point2i> my_contour {
-        //     Point2i(220, 110),
-        //     Point2i(232, 117),
-        //     Point2i(253, 167),
-        //     Point2i(254, 166),
-        //     Point2i(245, 167),
-        //     Point2i(254, 166)
-        // };
-        // contours.push_back(my_contour);
 		for (unsigned int i=0; i<contours.size(); i++) {
 			Mat contourMat(contours[i]);
 
@@ -235,9 +249,12 @@ int main() {
 			}
 		}
 
+        // touchPoints.push_back(Point2i(400, 200));
+        // touchPoints.push_back(Point2i(340, 180));
+        // touchPoints.push_back(Point2i(300, 70));
+
 		// send TUIO cursors
-		
-		/* time = TuioTime::getSessionTime();
+		time = TuioTime::getSessionTime();
 		tuio->initFrame(time);
 
 		for (unsigned int i=0; i<touchPoints.size(); i++) { // touch points
@@ -254,7 +271,7 @@ int main() {
 
 		tuio->stopUntouchedMovingCursors();
 		tuio->removeUntouchedStoppedCursors();
-		tuio->commitFrame(); */
+		tuio->commitFrame();
 	
 
 		// draw debug frame
@@ -263,7 +280,6 @@ int main() {
 		debug.setTo(debugColor0, touch);  // touch mask
 		rectangle(debug, roi, debugColor1, 2); // surface boundaries
 		for (unsigned int i=0; i<touchPoints.size(); i++) { // touch points
-            std::cout << "ima touch point LOL" << std::endl;
 			circle(debug, touchPoints[i], 5, debugColor1, CV_FILLED);
 		}
 
@@ -276,9 +292,9 @@ int main() {
     listener->release(frames);
     dev->stop();
     dev->close();
-    delete listener;
-    delete dev;
-    delete pipeline;
+    // delete listener;
+    // delete dev;
+    // delete pipeline;
 
 	return 0;
 }
