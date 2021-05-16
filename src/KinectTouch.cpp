@@ -121,25 +121,20 @@ void average(vector<Mat1s>& frames, Mat1s& mean) {
 
 	for (unsigned int i=1; i<frames.size(); i++) {
 		frames[i].convertTo(frame, CV_64FC1);
-        // std::cout << "frame -------------" << std::endl;
-        // printMat1d(frame);
 		acc = acc + frame;
-        // std::cout << "frame -------------" << std::endl;
-        // printMat1d(acc);
 	}
 
 	acc = acc / frames.size();
-    // printMat1d(acc);
 
 	acc.convertTo(mean, CV_16SC1);
 }
 
 int main() {
 
-	const unsigned int nBackgroundTrain = 30;
-	const unsigned short touchDepthMin = 10;
-	const unsigned short touchDepthMax = 20;
-	const unsigned int touchMinArea = 50;
+	const unsigned int nBackgroundTrain = 20;
+	int touchDepthMin = 10;
+	int touchDepthMax = 20;
+	int touchMinArea = 30;
 
 	const bool localClientMode = true; 					// connect to a local client
 
@@ -149,10 +144,10 @@ int main() {
 	const Scalar debugColor1(255,0,0);
 	const Scalar debugColor2(255,255,255);
 
-	int xMin = 110;
-	int xMax = 512;
-	int yMin = 120;
-	int yMax = 424;
+	int xMin = 144;
+	int xMax = 471;
+	int yMin = 64;
+	int yMax = 238;
     
 	Mat1s depth(424, 512); // 16 bit depth (in millimeters)
 	Mat1b depth8(424, 512); // 8 bit depth
@@ -160,10 +155,10 @@ int main() {
 
 	Mat3b debug(424, 512); // debug visualization
 
-	Mat1s foreground(512, 424);
-	Mat1b foreground8(512, 424);
+	Mat1s foreground(424, 512);
+	Mat1b foreground8(424, 512);
 
-	Mat1b touch(512, 424); // touch mask
+	Mat1b touch(424, 512); // touch mask
 
 	Mat1s background(424, 512);
 	vector<Mat1s> buffer(nBackgroundTrain);
@@ -177,10 +172,10 @@ int main() {
 	TuioServer* tuio;
 	if (localClientMode) {
 		tuio = new TuioServer();
-        std::cout << "--- we are local ---" << std::endl;
+        std::cout << "--- local ---" << std::endl;
 	} else {
 		tuio = new TuioServer("192.168.0.2",3333,false);
-        std::cout << "--- we are NOOOOOT local ---" << std::endl;
+        std::cout << "--- NOOOOOT local ---" << std::endl;
 	}
 	TuioTime time;
 
@@ -190,6 +185,9 @@ int main() {
 	createTrackbar("xMax", windowName, &xMax, 512);
 	createTrackbar("yMin", windowName, &yMin, 424);
 	createTrackbar("yMax", windowName, &yMax, 424);
+	createTrackbar("touchDepthMin", windowName, &touchDepthMin, 100);
+	createTrackbar("touchDepthMax", windowName, &touchDepthMax, 200);
+	createTrackbar("touchMinArea", windowName, &touchMinArea, 100);
 
     libfreenect2::Frame *depthFrame;
 	// create background model (average depth)
@@ -200,7 +198,6 @@ int main() {
 		buffer[i] = depth;
 	}
 	average(buffer, background);
-    // printMat(background);
     
 	while ( (char) waitKey(1) != (char) 27 ) {
 		// read available data
@@ -238,8 +235,6 @@ int main() {
                 std::cout << "------------------------------------------------" << std::endl;
                 std::cout << cArea << std::endl;
             }
-            
-
 
             std::cout << "contour Area: " << cArea << ", touchMinArea: " << touchMinArea << std::endl;
 			if ( cArea > touchMinArea ) {
@@ -292,9 +287,6 @@ int main() {
     listener->release(frames);
     dev->stop();
     dev->close();
-    // delete listener;
-    // delete dev;
-    // delete pipeline;
 
 	return 0;
 }
