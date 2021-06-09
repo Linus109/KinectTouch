@@ -302,6 +302,7 @@ TuioCursor* TuioServer::addTuioCursor(float x, float y, float z) {
 	} else maxCursorID = cursorID;	
 	
 	TuioCursor *tcur = new TuioCursor(currentFrameTime, sessionID, cursorID, x, y, z);
+    TuioTime t = tcur->getTuioTime();
 	cursorList.push_back(tcur);
 	updateCursor = true;
 
@@ -579,7 +580,7 @@ TuioObject* TuioServer::getClosestTuioObject(float xp, float yp) {
 TuioCursor* TuioServer::getClosestTuioCursor(float xp, float yp, float zp) {
 
 	TuioCursor *closestCursor = NULL;
-	float closestDistance = 1.0f;
+	float closestDistance = 0.2f;
 
 	for (std::list<TuioCursor*>::iterator iter=cursorList.begin(); iter != cursorList.end(); iter++) {
 		float distance = (*iter)->getDistance(xp,yp,zp);

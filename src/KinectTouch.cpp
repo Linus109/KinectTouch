@@ -24,10 +24,12 @@ using namespace std;
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/opencv.hpp>
+#include <opencv2/imgcodecs.hpp>
 using namespace cv;
 
 #define CV_RETR_LIST cv::RETR_LIST
 #define CV_CHAIN_APPROX_SIMPLE cv::CHAIN_APPROX_SIMPLE 
+#define CV_CHAIN_APPROX_NONE cv::CHAIN_APPROX_NONE 
 #define CV_GRAY2BGR cv::COLOR_GRAY2BGR 
 #define CV_FILLED cv::FILLED
 
@@ -131,10 +133,11 @@ void average(vector<Mat1s>& frames, Mat1s& mean) {
 
 int main() {
 
-	const unsigned int nBackgroundTrain = 20;
-	int touchDepthMin = 10;
-	int touchDepthMax = 20;
-	int touchMinArea = 30;
+	const unsigned int nBackgroundTrain = 30;
+	int touchDepthMin = 5;
+	int touchDepthMax = 15;
+	int touchMinArea = 5;
+	int touchMaxArea = 10;
 
 	const bool localClientMode = true; 					// connect to a local client
 
@@ -144,10 +147,10 @@ int main() {
 	const Scalar debugColor1(255,0,0);
 	const Scalar debugColor2(255,255,255);
 
-	int xMin = 144;
-	int xMax = 471;
-	int yMin = 64;
-	int yMax = 238;
+	int xMin = 101;
+	int xMax = 404;
+	int yMin = 49;
+	int yMax = 355;
     
 	Mat1s depth(424, 512); // 16 bit depth (in millimeters)
 	Mat1b depth8(424, 512); // 8 bit depth
@@ -172,10 +175,10 @@ int main() {
 	TuioServer* tuio;
 	if (localClientMode) {
 		tuio = new TuioServer();
-        std::cout << "--- local ---" << std::endl;
+        // std::cout << "--- local ---" << std::endl;
 	} else {
 		tuio = new TuioServer("192.168.0.2",3333,false);
-        std::cout << "--- NOOOOOT local ---" << std::endl;
+        // std::cout << "--- NOOOOOT local ---" << std::endl;
 	}
 	TuioTime time;
 
@@ -188,6 +191,7 @@ int main() {
 	createTrackbar("touchDepthMin", windowName, &touchDepthMin, 100);
 	createTrackbar("touchDepthMax", windowName, &touchDepthMax, 200);
 	createTrackbar("touchMinArea", windowName, &touchMinArea, 100);
+	createTrackbar("touchMaxArea", windowName, &touchMaxArea, 100);
 
     libfreenect2::Frame *depthFrame;
 	// create background model (average depth)
@@ -231,22 +235,20 @@ int main() {
 			Mat contourMat(contours[i]);
 
             double cArea = contourArea(contourMat);
-            if (cArea > 1) {
-                std::cout << "------------------------------------------------" << std::endl;
-                std::cout << cArea << std::endl;
-            }
+            // if (cArea > 1) {
+            //     std::cout << "------------------------------------------------" << std::endl;
+            //     std::cout << cArea << std::endl;
+            // }
 
-            std::cout << "contour Area: " << cArea << ", touchMinArea: " << touchMinArea << std::endl;
-			if ( cArea > touchMinArea ) {
+            // std::cout << "contour Area: " << cArea << ", touchMinArea: " << touchMinArea << std::endl;
+			if ( cArea > touchMinArea && cArea <= touchMaxArea ) {
+                std::cout << "contour: " << contourMat << std::endl;
 				Scalar center = mean(contourMat);
 				Point2i touchPoint(center[0], center[1]);
 				touchPoints.push_back(touchPoint);
 			}
 		}
-
-        // touchPoints.push_back(Point2i(400, 200));
-        // touchPoints.push_back(Point2i(340, 180));
-        // touchPoints.push_back(Point2i(300, 70));
+        std::cout << "------------------------------------------------" << std::endl;
 
 		// send TUIO cursors
 		time = TuioTime::getSessionTime();
@@ -255,12 +257,15 @@ int main() {
 		for (unsigned int i=0; i<touchPoints.size(); i++) { // touch points
 			float cursorX = (touchPoints[i].x - xMin) / (xMax - xMin);
 			float cursorY = 1 - (touchPoints[i].y - yMin)/(yMax - yMin);
+            // std::cout << "touchpoint[" << i << "]: x=" << cursorX << ", y=" << cursorY << std::endl; 
 			TuioCursor* cursor = tuio->getClosestTuioCursor(cursorX,cursorY);
 			// TODO improve tracking (don't move cursors away, that might be closer to another touch point)
-			if (cursor == NULL || cursor->getTuioTime() == time) {
+			if (cursor == NULL) {
 				tuio->addTuioCursor(cursorX,cursorY);
+                // std::cout << "addTuioCursor[" << i << "]: x=" << cursorX << ", y=" << cursorY << std::endl; 
 			} else {
 				tuio->updateTuioCursor(cursor, cursorX, cursorY);
+                // std::cout << "updateTuioCursor[" << i << "]: x=" << cursorX << ", y=" << cursorY << std::endl; 
 			}
 		}
 
