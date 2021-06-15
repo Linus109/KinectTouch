@@ -19,11 +19,16 @@ file(GLOB TUIO
   "src/TUIO/*.cpp"
 )
 
+file(GLOB freenectToOpencv
+    "src/Libfreenect2OpenCV.cpp"
+    "src/Libfreenect2OpenCV.h"
+)
+
 find_package(OpenCV REQUIRED)
 find_package(freenect2 REQUIRED)
 find_package(Threads REQUIRED)
 
-add_executable( KinectTouch src/KinectTouch.cpp ${OSC} ${TUIO} )
+add_executable( KinectTouch src/KinectTouch.cpp ${OSC} ${TUIO} ${freenectToOpencv} )
 # add_executable(KinectTouch src/KinectTouch.cpp)
 
 include_directories(

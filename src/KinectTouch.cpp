@@ -14,10 +14,13 @@
  */
 
 #include <iostream>
+#include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
 #include <ostream>
 #include <vector>
 #include <map>
 #include <fstream>
+#include <math.h>
 using namespace std;
 
 // openCV
@@ -43,6 +46,7 @@ using namespace cv;
 
 // TUIO
 #include "TuioServer.h"
+#include "Libfreenect2OpenCV.h"
 using namespace TUIO;
 
 // TODO smoothing using kalman filter
@@ -51,91 +55,30 @@ using namespace TUIO;
 // Globals
 //---------------------------------------------------------------------------
 
-// libfreenect2
-std::string serial;
-libfreenect2::Freenect2 freenect2;
-libfreenect2::Freenect2Device *dev = 0;
-libfreenect2::PacketPipeline *pipeline = 0;
-libfreenect2::FrameMap frames;
-libfreenect2::SyncMultiFrameListener *listener;
-
 bool mousePressed = false;
 
 //---------------------------------------------------------------------------
 // Functions
 //---------------------------------------------------------------------------
 
-int initLibfreenect2() {
-    if(freenect2.enumerateDevices() == 0) {
-        std::cout << "no device connected!" << std::endl;
-        return -1;
-    }
-    if (serial == "") {
-        serial = freenect2.getDefaultDeviceSerialNumber();
-    }
-
-    pipeline = new libfreenect2::CpuPacketPipeline();
-    dev = freenect2.openDevice(serial, pipeline);
-
-    int types = 0;
-    types |= libfreenect2::Frame::Ir | libfreenect2::Frame::Depth | libfreenect2::Frame::Color;
-    listener = new libfreenect2::SyncMultiFrameListener(types);
-    dev->setColorFrameListener(listener);
-    dev->setIrAndDepthFrameListener(listener);
-
-    if (!dev->start()) {
-        std::cout << "could not start device" << std::endl;
-        return -1;
-    }
-
-    std::cout << "device serial: " << dev->getSerialNumber() << std::endl;
-    std::cout << "device firmware: " << dev->getFirmwareVersion() << std::endl;
-
-    libfreenect2::Registration* registration = new libfreenect2::Registration(
-            dev->getIrCameraParams(), dev->getColorCameraParams());
-    libfreenect2::Frame undistorted(512, 424, 4), registered(512, 424, 4);
-
-	return 0;
-}
-
-void printMat1d(Mat1d& m) {
-    // for (int i = 0; i < background.rows; i++) {
-        for (int j = 0; j < m.cols; j++) {
-            short val = m.at<double>(j, 212);
-            std::cout << "x:  " << j << ", y:" << 212 << ", value = " << val << std::endl;
-        }
-    // }
-}
-
-void printMat1s(Mat1s& m) {
-    // for (int i = 0; i < background.rows; i++) {
-        for (int j = 0; j < m.cols; j++) {
-            short val = m.at<short>(j, 212);
-            std::cout << "x:  " << j << ", y:" << 212 << ", value = " << val << std::endl;
-        }
-    // }
-}
-
-void average(vector<Mat1s>& frames, Mat1s& mean) {
-	Mat1d acc(mean.size());
-	Mat1d frame(mean.size());
-    frames[0].convertTo(acc, CV_64FC1);
+void average(vector<Mat>& frames, Mat& mean) {
+    Mat acc(mean.size(), mean.type());
+	Mat frame(mean.size(), mean.type());
+    frames[0].copyTo(acc);
 
 	for (unsigned int i=1; i<frames.size(); i++) {
-		frames[i].convertTo(frame, CV_64FC1);
+		frames[i].copyTo(frame);
 		acc = acc + frame;
 	}
-
 	acc = acc / frames.size();
-
-	acc.convertTo(mean, CV_16SC1);
+    acc.copyTo(mean);
 }
 
 int main() {
 
-	const unsigned int nBackgroundTrain = 30;
-	int touchDepthMin = 5;
-	int touchDepthMax = 15;
+	const unsigned int nBackgroundTrain = 10;
+	int touchDepthMin = 14;
+	int touchDepthMax = 43;
 	int touchMinArea = 5;
 	int touchMaxArea = 10;
 
@@ -147,31 +90,31 @@ int main() {
 	const Scalar debugColor1(255,0,0);
 	const Scalar debugColor2(255,255,255);
 
-	int xMin = 101;
-	int xMax = 404;
-	int yMin = 49;
-	int yMax = 355;
+	int xMin = 123;
+	int xMax = 370;
+	int yMin = 48;
+	int yMax = 245;
     
-	Mat1s depth(424, 512); // 16 bit depth (in millimeters)
+	Mat depth;
 	Mat1b depth8(424, 512); // 8 bit depth
 	Mat3b rgb(1080, 1920); // 8 bit depth
 
 	Mat3b debug(424, 512); // debug visualization
 
-	Mat1s foreground(424, 512);
+	Mat foreground;
 	Mat1b foreground8(424, 512);
 
-	Mat1b touch(424, 512); // touch mask
+	Mat touch;
 
-	Mat1s background(424, 512);
-	vector<Mat1s> buffer(nBackgroundTrain);
+	Mat background;
+	vector<Mat> buffer(nBackgroundTrain);
 
-	if (initLibfreenect2() == -1) {
-        std::cout << "failed to initialize libfreenect2" << std::endl;
-        exit(-1);
-    }
+    int multi = 2;
 
-	// TUIO server object
+    libfreenect2opencv::Libfreenect2OpenCV libfreenect2OpenCV;
+    libfreenect2OpenCV.start();
+
+	// {{{ TUIO server object
 	TuioServer* tuio;
 	if (localClientMode) {
 		tuio = new TuioServer();
@@ -181,8 +124,9 @@ int main() {
         // std::cout << "--- NOOOOOT local ---" << std::endl;
 	}
 	TuioTime time;
+    // }}}
 
-	// create some sliders
+	// create some sliders {{{
 	namedWindow(windowName);
 	createTrackbar("xMin", windowName, &xMin, 512);
 	createTrackbar("xMax", windowName, &xMax, 512);
@@ -192,27 +136,21 @@ int main() {
 	createTrackbar("touchDepthMax", windowName, &touchDepthMax, 200);
 	createTrackbar("touchMinArea", windowName, &touchMinArea, 100);
 	createTrackbar("touchMaxArea", windowName, &touchMaxArea, 100);
+    // }}}
 
-    libfreenect2::Frame *depthFrame;
 	// create background model (average depth)
 	for (unsigned int i=0; i<nBackgroundTrain; i++) {
-		listener->waitForNewFrame(frames, 10*1000);
-        depthFrame = frames[libfreenect2::Frame::Depth];
-        Mat(depthFrame->height, depthFrame->width, CV_32FC1, depthFrame->data).copyTo(depth);
+        depth = libfreenect2OpenCV.getDepthMat();
 		buffer[i] = depth;
 	}
 	average(buffer, background);
     
+    int countup = 0;
 	while ( (char) waitKey(1) != (char) 27 ) {
 		// read available data
-		listener->waitForNewFrame(frames, 10*1000);
-
 		// update 16 bit depth matrix
-
-        depthFrame = frames[libfreenect2::Frame::Depth];
-		// depth.data = (uchar*) depthFrame;
-        Mat(depthFrame->height, depthFrame->width, CV_32FC1, depthFrame->data).copyTo(depth);
-
+        depth = libfreenect2OpenCV.getDepthMat();
+        
 		// update rgb image
 		/* rgb.data = (uchar*) frames[libfreenect2::Frame::Color]; // segmentation fault here
 		cvtColor(rgb, rgb, COLOR_RGB2BGR); */
@@ -223,34 +161,54 @@ int main() {
 		// find touch mask by thresholding (points that are close to background = touch points)
 		touch = (foreground > touchDepthMin) & (foreground < touchDepthMax);
 
+        // {{{ print mats
+        // if (countup >= 30) {
+        //     cout << "depth mat: " << endl;
+        //     cout << depth << endl;
+        //     cout << "***********" << endl;
+        //     cout << "foreground mat: " << endl;
+        //     cout << foreground << endl;
+        //     cout << "***********" << endl;
+        //     cout << "touch mat: " << endl;
+        //     cout << touch << endl;
+            
+        //     cout << "is background == depth?" << endl;
+        //     cv::Mat diff = background != depth;
+        //     // Equal if no elements disagree
+        //     bool eq = cv::countNonZero(diff) == 0;
+        //     cout << eq << endl;
+            
+        //     countup = 0;
+        // }
+        // countup++;
+        // }}}
+
 		// extract ROI
 		Rect roi(xMin, yMin, xMax - xMin, yMax - yMin);
 		Mat touchRoi = touch(roi);
 
-		// find touch points
+		// {{{ find touch points
 		vector< vector<Point2i> > contours;
 		vector<Point2f> touchPoints;
 		findContours(touchRoi, contours, CV_RETR_LIST, CV_CHAIN_APPROX_SIMPLE, Point2i(xMin, yMin));
+        // vector< vector<Point2i> > hull(contours.size());
 		for (unsigned int i=0; i<contours.size(); i++) {
 			Mat contourMat(contours[i]);
 
             double cArea = contourArea(contourMat);
-            // if (cArea > 1) {
-            //     std::cout << "------------------------------------------------" << std::endl;
-            //     std::cout << cArea << std::endl;
-            // }
-
-            // std::cout << "contour Area: " << cArea << ", touchMinArea: " << touchMinArea << std::endl;
 			if ( cArea > touchMinArea && cArea <= touchMaxArea ) {
-                std::cout << "contour: " << contourMat << std::endl;
 				Scalar center = mean(contourMat);
+                // cout << "found contours" << endl;
+                // vector<Point2i> newHull(1);
+                // convexHull(contours[i], hull[i]);
+                // hull.insert(hull.end(), newHull);
 				Point2i touchPoint(center[0], center[1]);
 				touchPoints.push_back(touchPoint);
 			}
 		}
-        std::cout << "------------------------------------------------" << std::endl;
+        // }}}
 
-		// send TUIO cursors
+		// {{{ send TUIO cursors
 		time = TuioTime::getSessionTime();
 		tuio->initFrame(time);
 
@@ -272,9 +230,10 @@ int main() {
 		tuio->stopUntouchedMovingCursors();
 		tuio->removeUntouchedStoppedCursors();
 		tuio->commitFrame();
-	
 
-		// draw debug frame
+        // }}}
+	
+		// draw debug frame {{{
 		depth.convertTo(depth8, CV_8U, 255 / debugFrameMaxDepth); // render depth to debug frame
 		cvtColor(depth8, debug, CV_GRAY2BGR);
 		debug.setTo(debugColor0, touch);  // touch mask
@@ -283,15 +242,22 @@ int main() {
 			circle(debug, touchPoints[i], 5, debugColor1, CV_FILLED);
 		}
 
+        // cout << "hull size: " << hull.size() << endl;
+        // for (int i = 0; i < hull.size(); i++) {
+        //     drawContours(debug, hull, i, debugColor1, 3, 8, vector<Vec4i>(), 0);
+        //     cout << "hull[" << i << "]: " << hull[i] << endl;
+        // }
+
 		// render debug frame (with sliders)
 		imshow(windowName, debug);
+		// imshow(windowName, rawDepth);
 		// imshow(windowName, depthFrame->Float);
 		// imshow("image", rgb);
 
-	}
-    listener->release(frames);
-    dev->stop();
-    dev->close();
+        // }}}
 
+	}
+
+    libfreenect2OpenCV.stop();
 	return 0;
 }
