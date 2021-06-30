@@ -75,10 +75,10 @@ void average(vector<Mat>& frames, Mat& mean) {
 }
 
 int main() {
-
+    RNG rng(12345);
 	const unsigned int nBackgroundTrain = 10;
-	int touchDepthMin = 14;
-	int touchDepthMax = 43;
+	int touchDepthMin = 7;
+	int touchDepthMax = 20;
 	int touchMinArea = 5;
 	int touchMaxArea = 10;
 
@@ -89,15 +89,16 @@ int main() {
 	const Scalar debugColor0(0,0,128);
 	const Scalar debugColor1(255,0,0);
 	const Scalar debugColor2(255,255,255);
+	const Scalar debugColor3(0,255,0);
 
-	int xMin = 123;
-	int xMax = 370;
-	int yMin = 48;
-	int yMax = 245;
+	int xMin = 64;
+	int xMax = 428;
+	int yMin = 6;
+	int yMax = 285;
     
 	Mat depth;
 	Mat1b depth8(424, 512); // 8 bit depth
-	Mat3b rgb(1080, 1920); // 8 bit depth
+	Mat rgb; // 8 bit depth
 
 	Mat3b debug(424, 512); // debug visualization
 
@@ -154,6 +155,8 @@ int main() {
 		// update rgb image
 		/* rgb.data = (uchar*) frames[libfreenect2::Frame::Color]; // segmentation fault here
 		cvtColor(rgb, rgb, COLOR_RGB2BGR); */
+        // rgb = libfreenect2OpenCV.getRGBMat();
+        // cvtColor(rgb, rgb, COLOR_BGR2GRAY);
 
 		// extract foreground by simple subtraction of very basic background model
 		foreground = background - depth;
@@ -189,9 +192,11 @@ int main() {
 
 		// {{{ find touch points
 		vector< vector<Point2i> > contours;
+		// vector< vector<Point2i> > contoursRGB;
 		vector<Point2f> touchPoints;
 		findContours(touchRoi, contours, CV_RETR_LIST, CV_CHAIN_APPROX_SIMPLE, Point2i(xMin, yMin));
-        // vector< vector<Point2i> > hull(contours.size());
+		// findContours(rgb, contoursRGB, CV_RETR_LIST, CV_CHAIN_APPROX_SIMPLE);
+        // vector< vector<Point2i> > hull(contoursRGB.size());
 		for (unsigned int i=0; i<contours.size(); i++) {
 			Mat contourMat(contours[i]);
 
@@ -200,12 +205,15 @@ int main() {
 				Scalar center = mean(contourMat);
                 // cout << "found contours" << endl;
                 // vector<Point2i> newHull(1);
-                // convexHull(contours[i], hull[i]);
+                // convexHull(contours[i], newHull);
                 // hull.insert(hull.end(), newHull);
 				Point2i touchPoint(center[0], center[1]);
 				touchPoints.push_back(touchPoint);
 			}
 		}
+        // for (int i = 0; i < contoursRGB.size(); i++) {
+        //     convexHull(contoursRGB[i], hull[i]);
+        // }
         // }}}
 
 		// {{{ send TUIO cursors
@@ -235,24 +243,20 @@ int main() {
 	
 		// draw debug frame {{{
 		depth.convertTo(depth8, CV_8U, 255 / debugFrameMaxDepth); // render depth to debug frame
+		// foreground.convertTo(foreground8, CV_8U, 255 / debugFrameMaxDepth); // render depth to debug frame
 		cvtColor(depth8, debug, CV_GRAY2BGR);
+		// cvtColor(foreground8, debug, CV_GRAY2BGR);
 		debug.setTo(debugColor0, touch);  // touch mask
 		rectangle(debug, roi, debugColor1, 2); // surface boundaries
 		for (unsigned int i=0; i<touchPoints.size(); i++) { // touch points
 			circle(debug, touchPoints[i], 5, debugColor1, CV_FILLED);
 		}
 
-        // cout << "hull size: " << hull.size() << endl;
-        // for (int i = 0; i < hull.size(); i++) {
-        //     drawContours(debug, hull, i, debugColor1, 3, 8, vector<Vec4i>(), 0);
-        //     cout << "hull[" << i << "]: " << hull[i] << endl;
-        // }
-
 		// render debug frame (with sliders)
 		imshow(windowName, debug);
 		// imshow(windowName, rawDepth);
 		// imshow(windowName, depthFrame->Float);
-		// imshow("image", rgb);
+		// imshow("image", drawing);
 
         // }}}
 
