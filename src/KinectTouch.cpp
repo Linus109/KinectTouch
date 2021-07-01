@@ -20,7 +20,7 @@
 #include <vector>
 #include <map>
 #include <fstream>
-#include <math.h>
+#include <cmath>
 using namespace std;
 
 // openCV
@@ -61,60 +61,100 @@ bool mousePressed = false;
 // Functions
 //---------------------------------------------------------------------------
 
-void average(vector<Mat>& frames, Mat& mean) {
-    Mat acc(mean.size(), mean.type());
-	Mat frame(mean.size(), mean.type());
-    frames[0].copyTo(acc);
-
-	for (unsigned int i=1; i<frames.size(); i++) {
-		frames[i].copyTo(frame);
-		acc = acc + frame;
-	}
-	acc = acc / frames.size();
-    acc.copyTo(mean);
+void changeBlur(int, void* strength) {
+    int * st = (int *) strength;
+    if (*st <= 1) {
+        *st = 1;
+    }
 }
 
+Point2i getCenter(vector<Point2i> shape) {
+    Point center(0, 0);
+    for (Point hullPoint : shape) {
+        center += hullPoint;
+    }
+
+    center.x /= shape.size();
+    center.y /= shape.size();
+    return center;
+}
+
+double distance(Point2i point1, Point2i point2) {
+    return sqrt(pow(point1.x - point2.x, 2) + pow(point1.y - point2.y, 2));
+}
+
+/**
+ * Detects clusters of small shapes (noise) and removes them
+ * @param hull vector of shapes
+ * @param clusterRadius
+ * @return
+ */
+vector< vector<Point2i> > filterNoise(vector< vector<Point2i> > hull, int clusterRadius) {
+    int innerClusterRadius = clusterRadius * 0.66;
+    vector<int> cluster;
+    vector< vector<Point2i> > result;
+
+    for( int i = 0; i < hull.size(); i++ ) {
+        double area = cv::contourArea(hull[i]);
+        if(area < clusterRadius) {
+            result.push_back(hull[i]);
+        }
+    }
+
+    for(auto shape : result) {
+        Point2i center = getCenter(shape);
+        // outer radius
+        for (int i = 0; i < result.size(); i++) {
+            Point2i compareCenter = getCenter(result[i]);
+            if (center != compareCenter && distance(center, compareCenter) < clusterRadius) {
+                cluster.push_back(i);
+            }
+        }
+        //inner radius
+        if(cluster.size() >= 10) {
+            for(int i : cluster) {
+                Point2i compareCenter = getCenter(result[i]); //gg
+                if(distance(center, compareCenter) < innerClusterRadius) {
+                    result.erase(result.begin() + i);   // ¯\_(ツ)_/¯
+                }
+            }
+        }
+    }
+    return result;
+}
+
+
+
 int main() {
-    RNG rng(12345);
-	const unsigned int nBackgroundTrain = 10;
-	int touchDepthMin = 7;
-	int touchDepthMax = 20;
-	int touchMinArea = 5;
-	int touchMaxArea = 10;
+    Mat background;
+    Mat touch; 
+    Mat binarized;
+    Mat blur;
+    Mat touchRoi;
+    Mat depth;
+    Mat mult;
+    Mat contoursMat;
+
+	int touchMinArea = 13;
+	int touchMaxArea = 23;
+    int multiply = 1;
+    int blurStrength = 1;
+    int blurStrength2 = 6;
+	int xMin = 243;
+	int xMax = 359;
+	int yMin = 113;
+	int yMax = 285;
+    int thresh = 1;
+    int filterThreshold = 20;
 
 	const bool localClientMode = true; 					// connect to a local client
-
-	const double debugFrameMaxDepth = 4000; // maximal distance (in millimeters) for 8 bit debug depth frame quantization
 	const char* windowName = "Debug";
-	const Scalar debugColor0(0,0,128);
-	const Scalar debugColor1(255,0,0);
-	const Scalar debugColor2(255,255,255);
-	const Scalar debugColor3(0,255,0);
-
-	int xMin = 64;
-	int xMax = 428;
-	int yMin = 6;
-	int yMax = 285;
+    const Scalar green(0, 255, 0);
+    const Scalar white(255, 255, 255);
+    const Scalar red(0, 0, 255);
+    const Scalar blue(255, 0, 0);
+    const Scalar magenta(255, 0, 255);
     
-	Mat depth;
-	Mat1b depth8(424, 512); // 8 bit depth
-	Mat rgb; // 8 bit depth
-
-	Mat3b debug(424, 512); // debug visualization
-
-	Mat foreground;
-	Mat1b foreground8(424, 512);
-
-	Mat touch;
-
-	Mat background;
-	vector<Mat> buffer(nBackgroundTrain);
-
-    int multi = 2;
-
-    libfreenect2opencv::Libfreenect2OpenCV libfreenect2OpenCV;
-    libfreenect2OpenCV.start();
-
 	// {{{ TUIO server object
 	TuioServer* tuio;
 	if (localClientMode) {
@@ -129,92 +169,61 @@ int main() {
 
 	// create some sliders {{{
 	namedWindow(windowName);
+    createTrackbar("blur strength", windowName, &blurStrength, 50, changeBlur, &blurStrength);
+    createTrackbar("blur strength 2", windowName, &blurStrength2, 50, changeBlur, &blurStrength2);
+    createTrackbar("multiply", windowName, &multiply, 100);
+    createTrackbar("thresh", windowName, &thresh, 2000);
 	createTrackbar("xMin", windowName, &xMin, 512);
 	createTrackbar("xMax", windowName, &xMax, 512);
 	createTrackbar("yMin", windowName, &yMin, 424);
 	createTrackbar("yMax", windowName, &yMax, 424);
-	createTrackbar("touchDepthMin", windowName, &touchDepthMin, 100);
-	createTrackbar("touchDepthMax", windowName, &touchDepthMax, 200);
-	createTrackbar("touchMinArea", windowName, &touchMinArea, 100);
-	createTrackbar("touchMaxArea", windowName, &touchMaxArea, 100);
+	createTrackbar("touchMinArea", windowName, &touchMinArea, 10000);
+	createTrackbar("touchMaxArea", windowName, &touchMaxArea, 10000);
     // }}}
 
-	// create background model (average depth)
-	for (unsigned int i=0; i<nBackgroundTrain; i++) {
-        depth = libfreenect2OpenCV.getDepthMat();
-		buffer[i] = depth;
-	}
-	average(buffer, background);
-    
-    int countup = 0;
+    int timeCount = 0, shotCount = 0;
+    libfreenect2opencv::Libfreenect2OpenCV libfreenect2OpenCV;
+    libfreenect2OpenCV.start();
 	while ( (char) waitKey(1) != (char) 27 ) {
-		// read available data
-		// update 16 bit depth matrix
-        depth = libfreenect2OpenCV.getDepthMat();
-        
-		// update rgb image
-		/* rgb.data = (uchar*) frames[libfreenect2::Frame::Color]; // segmentation fault here
-		cvtColor(rgb, rgb, COLOR_RGB2BGR); */
-        // rgb = libfreenect2OpenCV.getRGBMat();
-        // cvtColor(rgb, rgb, COLOR_BGR2GRAY);
-
-		// extract foreground by simple subtraction of very basic background model
-		foreground = background - depth;
-
-		// find touch mask by thresholding (points that are close to background = touch points)
-		touch = (foreground > touchDepthMin) & (foreground < touchDepthMax);
-
-        // {{{ print mats
-        // if (countup >= 30) {
-        //     cout << "depth mat: " << endl;
-        //     cout << depth << endl;
-        //     cout << "***********" << endl;
-        //     cout << "foreground mat: " << endl;
-        //     cout << foreground << endl;
-        //     cout << "***********" << endl;
-        //     cout << "touch mat: " << endl;
-        //     cout << touch << endl;
-            
-        //     cout << "is background == depth?" << endl;
-        //     cv::Mat diff = background != depth;
-        //     // Equal if no elements disagree
-        //     bool eq = cv::countNonZero(diff) == 0;
-        //     cout << eq << endl;
-            
-        //     countup = 0;
-        // }
-        // countup++;
-        // }}}
+        depth = libfreenect2OpenCV.getDepthMatUndistorted();
+        mult = depth * multiply;
+        cv::blur(mult, blur, Size(blurStrength, blurStrength));
+        cv::threshold(blur, binarized, thresh, 255, CV_8UC1);
+        cv::blur(binarized, binarized, Size(blurStrength, blurStrength));
+        cv::threshold(binarized, binarized, 1, 255, CV_8UC1);
+        binarized.convertTo(binarized, CV_8UC1);
 
 		// extract ROI
 		Rect roi(xMin, yMin, xMax - xMin, yMax - yMin);
-		Mat touchRoi = touch(roi);
+		touchRoi = binarized(roi);
+        // cout << touchRoi << endl;
 
 		// {{{ find touch points
 		vector< vector<Point2i> > contours;
-		// vector< vector<Point2i> > contoursRGB;
 		vector<Point2f> touchPoints;
 		findContours(touchRoi, contours, CV_RETR_LIST, CV_CHAIN_APPROX_SIMPLE, Point2i(xMin, yMin));
-		// findContours(rgb, contoursRGB, CV_RETR_LIST, CV_CHAIN_APPROX_SIMPLE);
-        // vector< vector<Point2i> > hull(contoursRGB.size());
+        vector< vector<Point> > hull(contours.size());
 		for (unsigned int i=0; i<contours.size(); i++) {
 			Mat contourMat(contours[i]);
+            convexHull(Mat(contours[i]), hull[i], false);
 
-            double cArea = contourArea(contourMat);
-			if ( cArea > touchMinArea && cArea <= touchMaxArea ) {
-				Scalar center = mean(contourMat);
-                // cout << "found contours" << endl;
-                // vector<Point2i> newHull(1);
-                // convexHull(contours[i], newHull);
-                // hull.insert(hull.end(), newHull);
-				Point2i touchPoint(center[0], center[1]);
-				touchPoints.push_back(touchPoint);
-			}
+   //          double cArea = contourArea(contourMat);
+			// if ( cArea > touchMinArea && cArea <= touchMaxArea ) {
+			// 	Scalar center = mean(contourMat);
+			// 	Point2i touchPoint(center[0], center[1]);
+			// 	touchPoints.push_back(touchPoint);
+			// }
+//            vector <double> hullArea;
+//            double hArea = contourArea(hull[i]);
+//			if ( hArea > touchMinArea && hArea < touchMaxArea ) {
+//                Point2i center = getCenter(hull[i]);
+//				Point2i touchPoint(center.x, center.y);
+//				touchPoints.push_back(touchPoint);
+//            }
+
 		}
-        // for (int i = 0; i < contoursRGB.size(); i++) {
-        //     convexHull(contoursRGB[i], hull[i]);
-        // }
         // }}}
+        vector< vector<Point2i> > filteredHulls = filterNoise(hull, filterThreshold);  //hulls with a certain min size and filtered noise
 
 		// {{{ send TUIO cursors
 		time = TuioTime::getSessionTime();
@@ -240,24 +249,35 @@ int main() {
 		tuio->commitFrame();
 
         // }}}
+
+
+        if (timeCount >= 40) {
+            imwrite("pics/show" + std::to_string(shotCount) + ".jpg", binarized);
+            shotCount++;
+            timeCount = -1;
+        }
+        timeCount++;
 	
 		// draw debug frame {{{
-		depth.convertTo(depth8, CV_8U, 255 / debugFrameMaxDepth); // render depth to debug frame
-		// foreground.convertTo(foreground8, CV_8U, 255 / debugFrameMaxDepth); // render depth to debug frame
-		cvtColor(depth8, debug, CV_GRAY2BGR);
-		// cvtColor(foreground8, debug, CV_GRAY2BGR);
-		debug.setTo(debugColor0, touch);  // touch mask
-		rectangle(debug, roi, debugColor1, 2); // surface boundaries
-		for (unsigned int i=0; i<touchPoints.size(); i++) { // touch points
-			circle(debug, touchPoints[i], 5, debugColor1, CV_FILLED);
-		}
+        cvtColor(binarized, contoursMat, COLOR_GRAY2BGR);
 
-		// render debug frame (with sliders)
-		imshow(windowName, debug);
-		// imshow(windowName, rawDepth);
-		// imshow(windowName, depthFrame->Float);
-		// imshow("image", drawing);
+		rectangle(contoursMat, roi, blue, 2); // surface boundaries
 
+        for (int i = 0; i < contours.size(); i++) {
+            drawContours(contoursMat, contours, i, green);
+        }
+
+        for (int i = 0; i < filteredHulls.size(); i++) {
+            double hArea = contourArea(filteredHulls[i]);
+//            cout << hArea << endl;
+            drawContours(contoursMat, filteredHulls, i, magenta);
+        }
+
+//        for (Point2f touchPoint : touchPoints) {
+//            circle(contoursMat, touchPoint, 5, red, -1);
+//        }
+
+        imshow(windowName, contoursMat);
         // }}}
 
 	}
