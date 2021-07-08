@@ -47,6 +47,9 @@ using namespace cv;
 // TUIO
 #include "TuioServer.h"
 #include "Libfreenect2OpenCV.h"
+//#include "ShapeFilterStrategy.h"
+#include "ClusterFilter.h"
+#include "DensityFilter.h"
 using namespace TUIO;
 
 // TODO smoothing using kalman filter
@@ -68,63 +71,6 @@ void changeBlur(int, void* strength) {
     }
 }
 
-Point2i getCenter(vector<Point2i> shape) {
-    Point center(0, 0);
-    for (Point hullPoint : shape) {
-        center += hullPoint;
-    }
-
-    center.x /= shape.size();
-    center.y /= shape.size();
-    return center;
-}
-
-double distance(Point2i point1, Point2i point2) {
-    return sqrt(pow(point1.x - point2.x, 2) + pow(point1.y - point2.y, 2));
-}
-
-/**
- * Detects clusters of small shapes (noise) and removes them
- * @param hull vector of shapes
- * @param clusterRadius
- * @return
- */
-vector< vector<Point2i> > filterNoise(vector< vector<Point2i> > hull, int clusterRadius) {
-    int innerClusterRadius = clusterRadius * 0.66;
-    vector<int> cluster;
-    vector< vector<Point2i> > result;
-
-    for( int i = 0; i < hull.size(); i++ ) {
-        double area = cv::contourArea(hull[i]);
-        if(area < clusterRadius) {
-            result.push_back(hull[i]);
-        }
-    }
-
-    for(auto shape : result) {
-        Point2i center = getCenter(shape);
-        // outer radius
-        for (int i = 0; i < result.size(); i++) {
-            Point2i compareCenter = getCenter(result[i]);
-            if (center != compareCenter && distance(center, compareCenter) < clusterRadius) {
-                cluster.push_back(i);
-            }
-        }
-        //inner radius
-        if(cluster.size() >= 10) {
-            for(int i : cluster) {
-                Point2i compareCenter = getCenter(result[i]); //gg
-                if(distance(center, compareCenter) < innerClusterRadius) {
-                    result.erase(result.begin() + i);   // ¯\_(ツ)_/¯
-                }
-            }
-        }
-    }
-    return result;
-}
-
-
-
 int main() {
     Mat background;
     Mat touch; 
@@ -134,18 +80,19 @@ int main() {
     Mat depth;
     Mat mult;
     Mat contoursMat;
+    ShapeFilterStrategy* filter = new DensityFilter();
 
 	int touchMinArea = 13;
 	int touchMaxArea = 23;
     int multiply = 1;
-    int blurStrength = 1;
-    int blurStrength2 = 6;
+    int blurStrength = 5;
+    int blurStrength2 = 3;
 	int xMin = 243;
 	int xMax = 359;
 	int yMin = 113;
 	int yMax = 285;
     int thresh = 1;
-    int filterThreshold = 20;
+    int filterRadius = 20;
 
 	const bool localClientMode = true; 					// connect to a local client
 	const char* windowName = "Debug";
@@ -179,6 +126,7 @@ int main() {
 	createTrackbar("yMax", windowName, &yMax, 424);
 	createTrackbar("touchMinArea", windowName, &touchMinArea, 10000);
 	createTrackbar("touchMaxArea", windowName, &touchMaxArea, 10000);
+	createTrackbar("FilterThreshold", windowName, filter->getDensityThresholdReference(), 50);
     // }}}
 
     int timeCount = 0, shotCount = 0;
@@ -223,8 +171,6 @@ int main() {
 
 		}
         // }}}
-        vector< vector<Point2i> > filteredHulls = filterNoise(hull, filterThreshold);  //hulls with a certain min size and filtered noise
-
 		// {{{ send TUIO cursors
 		time = TuioTime::getSessionTime();
 		tuio->initFrame(time);
@@ -232,15 +178,15 @@ int main() {
 		for (unsigned int i=0; i<touchPoints.size(); i++) { // touch points
 			float cursorX = (touchPoints[i].x - xMin) / (xMax - xMin);
 			float cursorY = 1 - (touchPoints[i].y - yMin)/(yMax - yMin);
-            // std::cout << "touchpoint[" << i << "]: x=" << cursorX << ", y=" << cursorY << std::endl; 
+            // std::cout << "touchpoint[" << i << "]: x=" << cursorX << ", y=" << cursorY << std::endl;
 			TuioCursor* cursor = tuio->getClosestTuioCursor(cursorX,cursorY);
 			// TODO improve tracking (don't move cursors away, that might be closer to another touch point)
 			if (cursor == NULL) {
 				tuio->addTuioCursor(cursorX,cursorY);
-                // std::cout << "addTuioCursor[" << i << "]: x=" << cursorX << ", y=" << cursorY << std::endl; 
+                // std::cout << "addTuioCursor[" << i << "]: x=" << cursorX << ", y=" << cursorY << std::endl;
 			} else {
 				tuio->updateTuioCursor(cursor, cursorX, cursorY);
-                // std::cout << "updateTuioCursor[" << i << "]: x=" << cursorX << ", y=" << cursorY << std::endl; 
+                // std::cout << "updateTuioCursor[" << i << "]: x=" << cursorX << ", y=" << cursorY << std::endl;
 			}
 		}
 
@@ -249,14 +195,10 @@ int main() {
 		tuio->commitFrame();
 
         // }}}
-
-
-        if (timeCount >= 40) {
-            imwrite("pics/show" + std::to_string(shotCount) + ".jpg", binarized);
-            shotCount++;
-            timeCount = -1;
-        }
-        timeCount++;
+      vector< vector<Point2i> > filteredHulls = filter->filter(hull, filterRadius + 100);  //hulls with a certain min size and filtered noise
+//        vector< vector<Point2i> > filteredHulls = hull;
+        cout << "------------------------------------------------" << endl;
+        cout << "Contours: " << contours.size() << endl << "Hulls: " << hull.size() << endl;
 	
 		// draw debug frame {{{
         cvtColor(binarized, contoursMat, COLOR_GRAY2BGR);
@@ -268,8 +210,6 @@ int main() {
         }
 
         for (int i = 0; i < filteredHulls.size(); i++) {
-            double hArea = contourArea(filteredHulls[i]);
-//            cout << hArea << endl;
             drawContours(contoursMat, filteredHulls, i, magenta);
         }
 

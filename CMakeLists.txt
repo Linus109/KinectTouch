@@ -24,11 +24,19 @@ file(GLOB freenectToOpencv
     "src/Libfreenect2OpenCV.h"
 )
 
+file(GLOB shapefilters
+    "src/ShapeFilterStrategy.h"
+    "src/ClusterFilter.cpp"
+    "src/ClusterFilter.h"
+    "src/DensityFilter.cpp"
+    "src/DensityFilter.h"
+)
+
 find_package(OpenCV REQUIRED)
 find_package(freenect2 REQUIRED)
 find_package(Threads REQUIRED)
 
-add_executable( KinectTouch src/KinectTouch.cpp ${OSC} ${TUIO} ${freenectToOpencv} )
+add_executable( KinectTouch src/KinectTouch.cpp ${OSC} ${TUIO} ${freenectToOpencv} ${shapefilters} src/Utils.h src/Utils.cpp)
 # add_executable(KinectTouch src/KinectTouch.cpp)
 
 include_directories(
