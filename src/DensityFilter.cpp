@@ -8,9 +8,18 @@
 #include "DensityFilter.h"
 
 vector<vector<Point2i> > DensityFilter::filter(vector<vector<Point2i>> hulls, int radius) {
+
+    if (hulls.size() == 0)
+        return hulls;
+
     int* densityScore = new int[hulls.size()] { 0 };
+
     for(int i = 0; i < hulls.size(); i++) {
+
         auto shape = hulls[i];
+
+        if (cv::contourArea(shape) > minShapeSize)
+            continue;
 
         for(int n = 0; n < hulls.size(); n++) {
             auto otherShape = hulls[n];

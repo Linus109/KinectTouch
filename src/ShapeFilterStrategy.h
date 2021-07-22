@@ -17,15 +17,21 @@ using namespace cv;
 class ShapeFilterStrategy {
     protected:
         int densityThreshold = 7;
+        int minShapeSize = 100;
 
     public:
         virtual vector< vector<Point2i> > filter(vector< vector< Point2i> > hulls, int radius) = 0;
         virtual ~ShapeFilterStrategy() {};
+
         void setDensityThreshold(int densityThreshold) {
             this->densityThreshold = densityThreshold;
         }
+
         int* getDensityThresholdReference() { return &densityThreshold; };
 
+        void setMinShapeSize(int minShapeSize) { this->minShapeSize = minShapeSize; };
+
+        int *getMinShapeSizeReference() { return &minShapeSize; };
 };
 
 
