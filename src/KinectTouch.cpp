@@ -21,7 +21,7 @@
 #include <map>
 #include <fstream>
 #include <cmath>
-#include <list>;
+#include <list>
 
 using namespace std;
 
@@ -61,7 +61,7 @@ using namespace TUIO;
 //---------------------------------------------------------------------------
 // Globals
 //---------------------------------------------------------------------------
-const  int framesForAverage = 50000;
+const  int framesForAverage = 10;
 list<Mat> frames;
 int oldestFrameIndex = 0;
 bool mousePressed = false;
@@ -84,30 +84,15 @@ void toggleFilter(int, void*) {
 }
 
 Mat calculateAverageFrame(list<Mat> *frames_, libfreenect2opencv::Libfreenect2OpenCV &libfreenect2OpenCV) {
-    Mat old = *frames_->begin();
-    Mat newFrame = libfreenect2OpenCV.getDepthMatUndistorted();
-    imshow("diff", old - newFrame);
-    frames_->pop_front();
-    cv::subtract(frameAcc, old, frameAcc);
-//    frameAcc = frameAcc - old;
-    cv::add(frameAcc, newFrame, frameAcc);
-//    frameAcc = frameAcc + newFrame;
-    int framesSize = frames_->size();
+    Mat old = frames_->front();
+    Mat newFrame;
+    libfreenect2OpenCV.getDepthMatUndistorted().copyTo(newFrame);
+    frameAcc = frameAcc - old;
+    frameAcc = frameAcc + newFrame;
     frames_->push_back(newFrame);
-    assert(frames_->size() - framesSize == 1);
-    imshow("avgDebug", frameAcc);
-    imshow("front", *frames_->begin());
-    imshow("back", frames_->back());
+    frames_->pop_front();
+
     return frameAcc / (double) frames_->size();
-}
-
-void test() {
-    list<Mat> matrices;
-    for (int i = 0; i < 5; i++) {
-        matrices.push_back(Mat(5, 5, CV_32FC1, i));
-    }
-
-    cout << ( std::next(matrices.begin(), 1) - std::next(matrices.begin(), matrices.size()-1) );
 }
 
 int main() {
@@ -174,138 +159,137 @@ int main() {
     libfreenect2opencv::Libfreenect2OpenCV libfreenect2OpenCV;
     libfreenect2OpenCV.start();
 
+    Mat tmpMat;
     for(int i = 0; i < framesForAverage; i++) {
-        depth = libfreenect2OpenCV.getDepthMatUndistorted();
-        frames.push_back(depth);
-//        cout << frameAcc.row(0).at<float>(0) << endl;
-        frameAcc += depth;
-//        cout << frameAcc.row(0).at<float>(0) << endl;
+        libfreenect2OpenCV.getDepthMatUndistorted().copyTo(tmpMat);
+        frames.push_back(tmpMat);
+        frameAcc += tmpMat;
     }
 
     int timeCount = 0, shotCount = 0;
     while ((char) waitKey(1) != (char) 27) {
-//        depth = libfreenect2OpenCV.getDepthMatUndistorted();
 
         depth = calculateAverageFrame(&frames, libfreenect2OpenCV);
 
-//        Mat depthDebug = (threshFG < depth) & (threshBG > depth);
-//
-//        Mat ir = libfreenect2OpenCV.getIRMat();
-//        Mat rgb = libfreenect2OpenCV.getRGBMat();
-//        cv::blur(depth, blur, Size(blurStrength, blurStrength));
-////        cv::threshold(blur, binarized, threshFG, 255, CV_8UC1);
-//        binarized = (threshFG < blur) & (threshBG > blur);
-////        cv::blur(binarized, binarized, Size(blurStrength, blurStrength));
-////        cv::threshold(binarized, binarized, 1, 255, CV_8UC1);
-//        binarized.convertTo(binarized, CV_8UC1);
-//
-//        // extract ROI
-//        Rect roi(xMin, yMin, xMax - xMin, yMax - yMin);
-//        touchRoi = binarized(roi);
-//        // cout << touchRoi << endl;
-//
-//        // {{{ find touch points
-//        vector<vector<Point2i> > contours;
-//        vector<Point2f> touchPoints;
-//        findContours(touchRoi, contours, CV_RETR_LIST, CV_CHAIN_APPROX_SIMPLE, Point2i(xMin, yMin));
-//        vector<vector<Point> > hull(contours.size());
-//        for (unsigned int i = 0; i < contours.size(); i++) {
-//            Mat contourMat(contours[i]);
-//            convexHull(Mat(contours[i]), hull[i], false);
-//
-//            //          double cArea = contourArea(contourMat);
-//            // if ( cArea > touchMinArea && cArea <= touchMaxArea ) {
-//            // 	Scalar center = mean(contourMat);
-//            // 	Point2i touchPoint(center[0], center[1]);
-//            // 	touchPoints.push_back(touchPoint);
-//            // }
-////            vector <double> hullArea;
-////            double hArea = contourArea(hull[i]);
-////			if ( hArea > touchMinArea && hArea < touchMaxArea ) {
-////                Point2i center = getCenter(hull[i]);
-////				Point2i touchPoint(center.x, center.y);
-////				touchPoints.push_back(touchPoint);
-////            }
-//
-//        }
-//        // }}}
-//        // {{{ send TUIO cursors
-//        time = TuioTime::getSessionTime();
-//        tuio->initFrame(time);
-//
-//        for (unsigned int i = 0; i < touchPoints.size(); i++) { // touch points
-//            float cursorX = (touchPoints[i].x - xMin) / (xMax - xMin);
-//            float cursorY = 1 - (touchPoints[i].y - yMin) / (yMax - yMin);
-//            // std::cout << "touchpoint[" << i << "]: x=" << cursorX << ", y=" << cursorY << std::endl;
-//            TuioCursor *cursor = tuio->getClosestTuioCursor(cursorX, cursorY);
-//            // TODO improve tracking (don't move cursors away, that might be closer to another touch point)
-//            if (cursor == NULL) {
-//                tuio->addTuioCursor(cursorX, cursorY);
-//                // std::cout << "addTuioCursor[" << i << "]: x=" << cursorX << ", y=" << cursorY << std::endl;
-//            } else {
-//                tuio->updateTuioCursor(cursor, cursorX, cursorY);
-//                // std::cout << "updateTuioCursor[" << i << "]: x=" << cursorX << ", y=" << cursorY << std::endl;
+        Mat depthDebug = (threshFG < depth) & (threshBG > depth);
+
+        Mat ir = libfreenect2OpenCV.getIRMat();
+        Mat rgb = libfreenect2OpenCV.getRGBMat();
+        cv::blur(depth, blur, Size(blurStrength, blurStrength));
+//        cv::threshold(blur, binarized, threshFG, 255, CV_8UC1);
+        binarized = (threshFG < blur) & (threshBG > blur);
+//        cv::blur(binarized, binarized, Size(blurStrength, blurStrength));
+//        cv::threshold(binarized, binarized, 1, 255, CV_8UC1);
+        binarized.convertTo(binarized, CV_8UC1);
+
+        // extract ROI
+        Rect roi(xMin, yMin, xMax - xMin, yMax - yMin);
+        touchRoi = binarized(roi);
+        // cout << touchRoi << endl;
+
+        // {{{ find touch points
+        vector<vector<Point2i> > contours;
+        vector<Point2f> touchPoints;
+        findContours(touchRoi, contours, CV_RETR_LIST, CV_CHAIN_APPROX_SIMPLE, Point2i(xMin, yMin));
+        vector<vector<Point> > hull(contours.size());
+        for (unsigned int i = 0; i < contours.size(); i++) {
+            Mat contourMat(contours[i]);
+            convexHull(Mat(contours[i]), hull[i], false);
+
+            //          double cArea = contourArea(contourMat);
+            // if ( cArea > touchMinArea && cArea <= touchMaxArea ) {
+            // 	Scalar center = mean(contourMat);
+            // 	Point2i touchPoint(center[0], center[1]);
+            // 	touchPoints.push_back(touchPoint);
+            // }
+//            vector <double> hullArea;
+//            double hArea = contourArea(hull[i]);
+//			if ( hArea > touchMinArea && hArea < touchMaxArea ) {
+//                Point2i center = getCenter(hull[i]);
+//				Point2i touchPoint(center.x, center.y);
+//				touchPoints.push_back(touchPoint);
 //            }
+
+        }
+        // }}}
+        // {{{ send TUIO cursors
+        time = TuioTime::getSessionTime();
+        tuio->initFrame(time);
+
+        for (unsigned int i = 0; i < touchPoints.size(); i++) { // touch points
+            float cursorX = (touchPoints[i].x - xMin) / (xMax - xMin);
+            float cursorY = 1 - (touchPoints[i].y - yMin) / (yMax - yMin);
+            // std::cout << "touchpoint[" << i << "]: x=" << cursorX << ", y=" << cursorY << std::endl;
+            TuioCursor *cursor = tuio->getClosestTuioCursor(cursorX, cursorY);
+            // TODO improve tracking (don't move cursors away, that might be closer to another touch point)
+            if (cursor == NULL) {
+                tuio->addTuioCursor(cursorX, cursorY);
+                // std::cout << "addTuioCursor[" << i << "]: x=" << cursorX << ", y=" << cursorY << std::endl;
+            } else {
+                tuio->updateTuioCursor(cursor, cursorX, cursorY);
+                // std::cout << "updateTuioCursor[" << i << "]: x=" << cursorX << ", y=" << cursorY << std::endl;
+            }
+        }
+
+        tuio->stopUntouchedMovingCursors();
+        tuio->removeUntouchedStoppedCursors();
+        tuio->commitFrame();
+
+        // }}}
+        vector<vector<Point2i> > filteredHulls;
+        if (useFilter) {
+            //hulls with a certain min size and filtered noise
+            filteredHulls = filter->filter(hull, filterRadius + 100);
+        } else {
+            filteredHulls = hull;
+        }
+        cout << "------------------------------------------------" << endl;
+        cout << "Contours: " << contours.size() << endl << "Hulls: " << hull.size() << endl;
+
+        for (vector<Point2i> hull : filteredHulls) {
+            Point2i center = getCenter(hull);
+            Point2i touchPoint(center.x, center.y);
+            touchPoints.push_back(touchPoint);
+        }
+
+        // draw debug frame {{{
+        cvtColor(binarized, contoursMat, COLOR_GRAY2BGR);
+
+        rectangle(contoursMat, roi, blue, 2); // surface boundaries
+
+        for (int i = 0; i < contours.size(); i++) {
+            drawContours(contoursMat, contours, i, green);
+        }
+
+        for (int i = 0; i < filteredHulls.size(); i++) {
+            drawContours(contoursMat, filteredHulls, i, magenta);
+            circle(contoursMat, touchPoints[i], 3, red, 3);
+        }
+
+//        for (Point2f touchPoint : touchPoints) {
+//            circle(contoursMat, touchPoint, 5, red, -1);
 //        }
-//
-//        tuio->stopUntouchedMovingCursors();
-//        tuio->removeUntouchedStoppedCursors();
-//        tuio->commitFrame();
-//
-//        // }}}
-//        vector<vector<Point2i> > filteredHulls;
-//        if (useFilter) {
-//            //hulls with a certain min size and filtered noise
-//            filteredHulls = filter->filter(hull, filterRadius + 100);
-//        } else {
-//            filteredHulls = hull;
-//        }
-//        cout << "------------------------------------------------" << endl;
-//        cout << "Contours: " << contours.size() << endl << "Hulls: " << hull.size() << endl;
-//
-//        for (vector<Point2i> hull : filteredHulls) {
-//            Point2i center = getCenter(hull);
-//            Point2i touchPoint(center.x, center.y);
-//            touchPoints.push_back(touchPoint);
-//        }
-//
-//        // draw debug frame {{{
-//        cvtColor(binarized, contoursMat, COLOR_GRAY2BGR);
-//
-//        rectangle(contoursMat, roi, blue, 2); // surface boundaries
-//
-//        for (int i = 0; i < contours.size(); i++) {
-//            drawContours(contoursMat, contours, i, green);
-//        }
-//
-//        for (int i = 0; i < filteredHulls.size(); i++) {
-//            drawContours(contoursMat, filteredHulls, i, magenta);
-//            circle(contoursMat, touchPoints[i], 3, red, 3);
-//        }
-//
-////        for (Point2f touchPoint : touchPoints) {
-////            circle(contoursMat, touchPoint, 5, red, -1);
-////        }
-//
-//        imshow(windowName, contoursMat);
-//
+
+        imshow(windowName, contoursMat);
+
         //show orig depth image
-//        Mat depth8;
-//        depth.convertTo(depth8, CV_8UC1);
-//        imshow("orig depth", depth8);
-        imshow("orig depth", depth);
+        Mat depth8;
+        depth.convertTo(depth8, CV_8UC1);
+        imshow("orig depth", depth8);
+        imshow("avg depth", depth);
+
+//        Mat ir8;
+//        ir.convertTo(ir8, CV_8UC1);
+//        imshow("ir image", ir8);
 //
-////        Mat ir8;
-////        ir.convertTo(ir8, CV_8UC1);
-////        imshow("ir image", ir8);
-////
-////        imshow("rgb", rgb);
-//
-//        imshow("depth debug", depthDebug);
-//        // }}}
+//        imshow("rgb", rgb);
+
+        imshow("depth debug", depthDebug);
+        // }}}
 
     }
 
+    delete filter;
     libfreenect2OpenCV.stop();
     return 0;
 }
