@@ -61,7 +61,7 @@ using namespace TUIO;
 //---------------------------------------------------------------------------
 // Globals
 //---------------------------------------------------------------------------
-const  int framesForAverage = 10;
+const  int framesForAverage = 24;
 list<Mat> frames;
 int oldestFrameIndex = 0;
 bool mousePressed = false;
@@ -95,6 +95,14 @@ Mat calculateAverageFrame(list<Mat> *frames_, libfreenect2opencv::Libfreenect2Op
     return frameAcc / (double) frames_->size();
 }
 
+void test() {
+    Mat testMat(5, 5, CV_32FC1, 4.5f);
+    testMat.row(2).col(3) = 10;
+    testMat.row(3).col(2) = 2.3;
+    Mat res = (3 < testMat) & (5 > testMat);
+    cout << res << endl;
+}
+
 int main() {
     Mat background;
     Mat touch;
@@ -105,6 +113,7 @@ int main() {
     Mat mult;
     Mat contoursMat;
     ShapeFilterStrategy *filter = new DensityFilter();
+//    ShapeFilterStrategy *filter = new ClusterFilter();
 
     int touchMinArea = 13;
     int touchMaxArea = 23;
@@ -115,12 +124,12 @@ int main() {
     int xMax = 512;
     int yMin = 46;
     int yMax = 357;
-    int threshFG = 1518;
-    int threshBG = 1600;
+    int threshFG = 1800;
+    int threshBG = 1820;
     int filterRadius = 20;
 
     const bool localClientMode = true;                    // connect to a local client
-    const char *windowName = "Debug";
+    const char *windowName = "results";
     const Scalar green(0, 255, 0);
     const Scalar white(255, 255, 255);
     const Scalar red(0, 0, 255);
@@ -171,16 +180,17 @@ int main() {
 
         depth = calculateAverageFrame(&frames, libfreenect2OpenCV);
 
-        Mat depthDebug = (threshFG < depth) & (threshBG > depth);
+//        Mat detectionPlane = (threshFG > depth) & (threshBG < depth);
 
         Mat ir = libfreenect2OpenCV.getIRMat();
         Mat rgb = libfreenect2OpenCV.getRGBMat();
         cv::blur(depth, blur, Size(blurStrength, blurStrength));
 //        cv::threshold(blur, binarized, threshFG, 255, CV_8UC1);
         binarized = (threshFG < blur) & (threshBG > blur);
+        bitwise_not(binarized, binarized);
 //        cv::blur(binarized, binarized, Size(blurStrength, blurStrength));
 //        cv::threshold(binarized, binarized, 1, 255, CV_8UC1);
-        binarized.convertTo(binarized, CV_8UC1);
+//        binarized.convertTo(binarized, CV_8UC1);
 
         // extract ROI
         Rect roi(xMin, yMin, xMax - xMin, yMax - yMin);
@@ -195,23 +205,26 @@ int main() {
         for (unsigned int i = 0; i < contours.size(); i++) {
             Mat contourMat(contours[i]);
             convexHull(Mat(contours[i]), hull[i], false);
-
-            //          double cArea = contourArea(contourMat);
-            // if ( cArea > touchMinArea && cArea <= touchMaxArea ) {
-            // 	Scalar center = mean(contourMat);
-            // 	Point2i touchPoint(center[0], center[1]);
-            // 	touchPoints.push_back(touchPoint);
-            // }
-//            vector <double> hullArea;
-//            double hArea = contourArea(hull[i]);
-//			if ( hArea > touchMinArea && hArea < touchMaxArea ) {
-//                Point2i center = getCenter(hull[i]);
-//				Point2i touchPoint(center.x, center.y);
-//				touchPoints.push_back(touchPoint);
-//            }
-
         }
         // }}}
+
+        // }}}
+        vector<vector<Point2i> > filteredHulls;
+        if (useFilter) {
+            //hulls with a certain min size and filtered noise
+            filteredHulls = filter->filter(hull, filterRadius + 100);
+        } else {
+            filteredHulls = hull;
+        }
+        cout << "------------------------------------------------" << endl;
+        cout << "Contours: " << contours.size() << endl << "Hulls: " << hull.size() << endl;
+
+        for (vector<Point2i> hull : filteredHulls) {
+            Point2i center = getCenter(hull);
+            Point2i touchPoint(center.x, center.y);
+            touchPoints.push_back(touchPoint);
+        }
+
         // {{{ send TUIO cursors
         time = TuioTime::getSessionTime();
         tuio->initFrame(time);
@@ -235,23 +248,6 @@ int main() {
         tuio->removeUntouchedStoppedCursors();
         tuio->commitFrame();
 
-        // }}}
-        vector<vector<Point2i> > filteredHulls;
-        if (useFilter) {
-            //hulls with a certain min size and filtered noise
-            filteredHulls = filter->filter(hull, filterRadius + 100);
-        } else {
-            filteredHulls = hull;
-        }
-        cout << "------------------------------------------------" << endl;
-        cout << "Contours: " << contours.size() << endl << "Hulls: " << hull.size() << endl;
-
-        for (vector<Point2i> hull : filteredHulls) {
-            Point2i center = getCenter(hull);
-            Point2i touchPoint(center.x, center.y);
-            touchPoints.push_back(touchPoint);
-        }
-
         // draw debug frame {{{
         cvtColor(binarized, contoursMat, COLOR_GRAY2BGR);
 
@@ -271,11 +267,6 @@ int main() {
 //        }
 
         imshow(windowName, contoursMat);
-
-        //show orig depth image
-        Mat depth8;
-        depth.convertTo(depth8, CV_8UC1);
-        imshow("orig depth", depth8);
         imshow("avg depth", depth);
 
 //        Mat ir8;
@@ -284,7 +275,7 @@ int main() {
 //
 //        imshow("rgb", rgb);
 
-        imshow("depth debug", depthDebug);
+//        imshow("depth debug", detectionPlane);
         // }}}
 
     }

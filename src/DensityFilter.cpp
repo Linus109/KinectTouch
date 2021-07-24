@@ -4,20 +4,58 @@
 
 #ifndef DENSITIY_FILTER_CPP
 #define DENSITY_FILTER_CPP
-
+#include <thread>
 #include "DensityFilter.h"
 
 vector<vector<Point2i> > DensityFilter::filter(vector<vector<Point2i>> hulls, int radius) {
-
+    int* densityScore = new int[hulls.size()] { 0 };
     if (hulls.size() == 0)
         return hulls;
 
-    int* densityScore = new int[hulls.size()] { 0 };
+    unsigned int supportedThreads = std::thread::hardware_concurrency() * 3;
+    int from = 0;
+    int to = 0;
+    std::mutex lock;
+    int stepSize = hulls.size() / supportedThreads;
+    if(hulls.size() < supportedThreads)
+        filterOnRange(hulls, radius, 0, hulls.size(), densityScore, &lock);
 
-    for(int i = 0; i < hulls.size(); i++) {
+    else {
+        std::thread threads[supportedThreads];
+
+        for (int i = 0; i < supportedThreads; i++) {
+            if(i == supportedThreads - 1) {
+                to = hulls.size();
+            }
+            else
+                to = from + stepSize;
+
+            threads[i] = std::thread(&DensityFilter::filterOnRange, this, hulls, radius, from, to, densityScore, &lock);
+            from = to;
+        }
+
+
+        for (std::thread &thread_ : threads) {
+            thread_.join();
+        }
+
+        for(int i = hulls.size(); i > 0; i--) {
+            if(densityScore[i] > densityThreshold)  {
+                hulls.erase(hulls.begin() + i);
+            }
+        }
+    }
+    delete[] densityScore;
+    return hulls;
+}
+
+void DensityFilter::filterOnRange(vector < vector<Point2i> > hulls, int radius, int from, int to, int* densityScore, std::mutex *lock) {
+
+    for(int i = from; i < to; i++) {
 
         auto shape = hulls[i];
-
+        if(shape.size() <= 0)
+            continue;
         if (cv::contourArea(shape) > minShapeSize)
             continue;
 
@@ -29,19 +67,15 @@ vector<vector<Point2i> > DensityFilter::filter(vector<vector<Point2i>> hulls, in
 
             if(distance(shape, otherShape) < radius) {
 //                densityScore[i]++;
+                lock->lock();
                 densityScore[n]++;
+                lock->unlock();
             }
         }
     }
 
-    for(int i = hulls.size(); i > 0; i--) {
-        if(densityScore[i] > densityThreshold)  {
-            hulls.erase(hulls.begin() + i);
-        }
-    }
 
-    delete[] densityScore;
-    return hulls;
+
 }
 
 #endif
