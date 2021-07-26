@@ -61,7 +61,7 @@ using namespace TUIO;
 //---------------------------------------------------------------------------
 // Globals
 //---------------------------------------------------------------------------
-const  int framesForAverage = 24;
+const  int framesForAverage = 40;
 list<Mat> frames;
 int oldestFrameIndex = 0;
 bool mousePressed = false;
@@ -104,6 +104,7 @@ void test() {
 }
 
 int main() {
+
     Mat background;
     Mat touch;
     Mat binarized;
@@ -177,6 +178,7 @@ int main() {
 
     int timeCount = 0, shotCount = 0;
     while ((char) waitKey(1) != (char) 27) {
+        auto start = std::chrono::high_resolution_clock::now();
 
         depth = calculateAverageFrame(&frames, libfreenect2OpenCV);
 
@@ -216,14 +218,19 @@ int main() {
         } else {
             filteredHulls = hull;
         }
-        cout << "------------------------------------------------" << endl;
-        cout << "Contours: " << contours.size() << endl << "Hulls: " << hull.size() << endl;
+        //cout << "------------------------------------------------" << endl;
+        //cout << "Contours: " << contours.size() << endl << "Hulls: " << hull.size() << endl;
 
         for (vector<Point2i> hull : filteredHulls) {
             Point2i center = getCenter(hull);
             Point2i touchPoint(center.x, center.y);
             touchPoints.push_back(touchPoint);
         }
+
+//        // Tracking
+//        Ptr<Tracker> tracker;
+//        tracker = TrackerMOSSE
+
 
         // {{{ send TUIO cursors
         time = TuioTime::getSessionTime();
@@ -277,6 +284,10 @@ int main() {
 
 //        imshow("depth debug", detectionPlane);
         // }}}
+
+        auto stop = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
+        cout << "Loop duration: " << duration.count() << endl;
 
     }
 

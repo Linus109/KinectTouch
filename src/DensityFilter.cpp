@@ -12,7 +12,8 @@ vector<vector<Point2i> > DensityFilter::filter(vector<vector<Point2i>> hulls, in
     if (hulls.size() == 0)
         return hulls;
 
-    unsigned int supportedThreads = std::thread::hardware_concurrency() * 3;
+    unsigned int supportedThreads = std::thread::hardware_concurrency();
+//    unsigned int supportedThreads = 1;
     int from = 0;
     int to = 0;
     std::mutex lock;
